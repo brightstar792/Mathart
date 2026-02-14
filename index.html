@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mathematical Art Studio</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --panel-dark: #1e293b;
+        }
+        body {
+            background-color: var(--bg-dark);
+            color: #f8fafc;
+            overflow: hidden;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: #1e293b;
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #475569;
+            border-radius: 10px;
+        }
+        canvas {
+            cursor: crosshair;
+            image-rendering: crisp-edges;
+        }
+        .control-group {
+            border-bottom: 1px solid #334155;
+            padding-bottom: 1rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col md:flex-row">
+
+    <!-- Sidebar / Controls -->
+    <aside id="controls" class="w-full md:w-80 bg-slate-900 h-1/2 md:h-full flex flex-col border-r border-slate-700 z-10">
+        <div class="p-6">
+            <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-cyan-400 to-purple-500">
+                MathArt Studio
+            </h1>
+            <p class="text-xs text-slate-400">Computational Geometry Generator</p>
+        </div>
+
+        <div class="flex-1 overflow-y-auto px-6 custom-scrollbar">
+            
+            <!-- Pattern Type -->
+            <div class="control-group">
+                <label class="block text-sm font-medium mb-2">Pattern Type</label>
+                <select id="patternType" class="w-full bg-slate-800 border border-slate-600 rounded p-2 text-sm focus:ring-2 focus:ring-cyan-500 outline-none">
+                    <option value="spirograph">Spirograph (Hypotrochoid)</option>
+                    <option value="rose">Rose Curve (Maurer Rose)</option>
+                    <option value="parametric">Parametric Harmony</option>
+                    <option value="fractal">Mandelbrot Fractal</option>
+                </select>
+            </div>
+
+            <!-- Dynamic Parameters Container -->
+            <div id="parameters">
+                <!-- Parameters will be injected here via JS -->
+            </div>
+
+            <!-- Visual Styling -->
+            <div class="control-group">
+                <label class="block text-sm font-medium mb-2">Color Mode</label>
+                <select id="colorMode" class="w-full bg-slate-800 border border-slate-600 rounded p-2 text-sm focus:ring-2 focus:ring-cyan-500 outline-none">
+                    <option value="rainbow">Rainbow Shift</option>
+                    <option value="monochrome">Monochrome</option>
+                    <option value="cyan-purple">Neon Glow</option>
+                    <option value="fire">Solar Flare</option>
+                </select>
+                
+                <div class="mt-4">
+                    <label class="block text-sm font-medium mb-1">Line Thickness: <span id="strokeVal">1.5</span></label>
+                    <input type="range" id="strokeWeight" min="0.1" max="10" step="0.1" value="1.5" class="w-full accent-cyan-500">
+                </div>
+
+                <div class="mt-4">
+                    <label class="block text-sm font-medium mb-1">Opacity: <span id="alphaVal">0.6</span></label>
+                    <input type="range" id="alpha" min="0.05" max="1" step="0.01" value="0.6" class="w-full accent-cyan-500">
+                </div>
+            </div>
+        </div>
+
+        <div class="p-6 bg-slate-950 flex gap-2">
+            <button id="randomize" class="flex-1 bg-slate-700 hover:bg-slate-600 transition-colors py-2 rounded text-sm font-medium">Randomize</button>
+            <button id="download" class="flex-1 bg-cyan-600 hover:bg-cyan-500 transition-colors py-2 rounded text-sm font-medium">Save PNG</button>
+        </div>
+    </aside>
+
+    <!-- Canvas Area -->
+    <main class="flex-1 relative bg-[#020617] flex items-center justify-center overflow-hidden">
+        <canvas id="artCanvas"></canvas>
+        
+        <!-- Info Overlay -->
+        <div class="absolute bottom-6 right-6 text-right opacity-40 text-xs font-mono pointer-events-none">
+            <p id="formulaDisplay">x = (R-r)cos(t) + d*cos((R-r)t/r)</p>
+            <p id="renderTime">Render: 0ms</p>
+        </div>
+    </main>
+
+    <script>
+        const canvas = document.getElementById('artCanvas');
+        const ctx = canvas.getContext('2d');
+        const parametersDiv = document.getElementById('parameters');
+        const patternSelect = document.getElementById('patternType');
+        const colorSelect = document.getElementById('colorMode');
+        const strokeInput = document.getElementById('strokeWeight');
+        const alphaInput = document.getElementById('alpha');
+        const randomizeBtn = document.getElementById('randomize');
+        const downloadBtn = document.getElementById('download');
+        const formulaDisplay = document.getElementById('formulaDisplay');
+        const renderTimeDisplay = document.getElementById('renderTime');
+
+        let width, height;
+        let params = {};
+
+        const PATTERN_DEFS = {
+            spirograph: {
+                name: "Spirograph",
+                formula: "x = (R-r)cos(t) + d*cos((R-r)t/r)",
+                inputs: [
+                    { id: 'R', label: 'Outer Radius (R)', min: 50, max: 300, step: 1, val: 150 },
+                    { id: 'r', label: 'Inner Radius (r)', min: 1, max: 100, step: 0.1, val: 52 },
+                    { id: 'd', label: 'Offset (d)', min: 10, max: 200, step: 1, val: 80 },
+                    { id: 'resol', label: 'Resolution', min: 100, max: 10000, step: 100, val: 5000 }
+                ]
+            },
+            rose: {
+                name: "Maurer Rose",
+                formula: "r = sin(n * theta)",
+                inputs: [
+                    { id: 'n', label: 'Petals (n)', min: 1, max: 20, step: 1, val: 7 },
+                    { id: 'd', label: 'Step (d)', min: 1, max: 360, step: 1, val: 29 },
+                    { id: 'size', label: 'Scale', min: 50, max: 400, step: 10, val: 250 },
+                    { id: 'points', label: 'Points', min: 360, max: 3600, step: 360, val: 360 }
+                ]
+            },
+            parametric: {
+                name: "Parametric",
+                formula: "x = sin(at + c), y = sin(bt)",
+                inputs: [
+                    { id: 'a', label: 'Freq A', min: 1, max: 20, step: 0.1, val: 3 },
+                    { id: 'b', label: 'Freq B', min: 1, max: 20, step: 0.1, val: 2 },
+                    { id: 'c', label: 'Phase Shift', min: 0, max: Math.PI * 2, step: 0.1, val: 1.5 },
+                    { id: 'scale', label: 'Scale', min: 50, max: 400, step: 10, val: 300 }
+                ]
+            },
+            fractal: {
+                name: "Mandelbrot",
+                formula: "z = z² + c",
+                inputs: [
+                    { id: 'iter', label: 'Iterations', min: 10, max: 500, step: 10, val: 100 },
+                    { id: 'zoom', label: 'Zoom', min: 0.5, max: 5, step: 0.1, val: 1 },
+                    { id: 'offsetX', label: 'X Pan', min: -2, max: 1, step: 0.05, val: -0.5 },
+                    { id: 'offsetY', label: 'Y Pan', min: -1.5, max: 1.5, step: 0.05, val: 0 }
+                ]
+            }
+        };
+
+        function init() {
+            resize();
+            window.addEventListener('resize', resize);
+            setupPatternUI();
+            
+            // Listeners
+            patternSelect.addEventListener('change', () => {
+                setupPatternUI();
+                draw();
+            });
+            colorSelect.addEventListener('change', draw);
+            strokeInput.addEventListener('input', (e) => {
+                document.getElementById('strokeVal').innerText = e.target.value;
+                draw();
+            });
+            alphaInput.addEventListener('input', (e) => {
+                document.getElementById('alphaVal').innerText = e.target.value;
+                draw();
+            });
+            randomizeBtn.addEventListener('click', randomizeParams);
+            downloadBtn.addEventListener('click', downloadImage);
+
+            draw();
+        }
+
+        function resize() {
+            const container = canvas.parentElement;
+            width = canvas.width = container.clientWidth;
+            height = canvas.height = container.clientHeight;
+            draw();
+        }
+
+        function setupPatternUI() {
+            const type = patternSelect.value;
+            const config = PATTERN_DEFS[type];
+            formulaDisplay.innerText = config.formula;
+            
+            parametersDiv.innerHTML = '';
+            params = {};
+
+            config.inputs.forEach(input => {
+                const wrap = document.createElement('div');
+                wrap.className = 'mt-4';
+                wrap.innerHTML = `
+                    <label class="block text-sm font-medium mb-1">${input.label}: <span id="${input.id}_val">${input.val}</span></label>
+                    <input type="range" id="${input.id}" min="${input.min}" max="${input.max}" step="${input.step}" value="${input.val}" class="w-full accent-cyan-500">
+                `;
+                parametersDiv.appendChild(wrap);
+                
+                params[input.id] = input.val;
+                
+                const slider = wrap.querySelector('input');
+                slider.addEventListener('input', (e) => {
+                    params[input.id] = parseFloat(e.target.value);
+                    document.getElementById(`${input.id}_val`).innerText = e.target.value;
+                    draw();
+                });
+            });
+        }
+
+        function randomizeParams() {
+            const type = patternSelect.value;
+            const config = PATTERN_DEFS[type];
+            config.inputs.forEach(input => {
+                const range = input.max - input.min;
+                const randVal = input.min + (Math.random() * range);
+                const stepCorrected = Math.round(randVal / input.step) * input.step;
+                params[input.id] = stepCorrected;
+                const slider = document.getElementById(input.id);
+                if(slider) {
+                    slider.value = stepCorrected;
+                    document.getElementById(`${input.id}_val`).innerText = stepCorrected.toFixed(2);
+                }
+            });
+            draw();
+        }
+
+        function getColor(i, total) {
+            const mode = colorSelect.value;
+            const alpha = alphaInput.value;
+            const p = i / total;
+
+            switch(mode) {
+                case 'rainbow':
+                    return `hsla(${p * 360}, 70%, 60%, ${alpha})`;
+                case 'cyan-purple':
+                    const hue = 180 + (p * 120);
+                    return `hsla(${hue}, 80%, 50%, ${alpha})`;
+                case 'fire':
+                    const r = 255;
+                    const g = Math.floor(p * 255);
+                    const b = 0;
+                    return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+                case 'monochrome':
+                    const lum = 40 + (p * 50);
+                    return `hsla(0, 0%, ${lum}%, ${alpha})`;
+                default:
+                    return `rgba(255, 255, 255, ${alpha})`;
+            }
+        }
+
+        function draw() {
+            const start = performance.now();
+            ctx.clearRect(0, 0, width, height);
+            ctx.lineWidth = strokeInput.value;
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            const type = patternSelect.value;
+            
+            if (type === 'spirograph') drawSpirograph();
+            if (type === 'rose') drawRose();
+            if (type === 'parametric') drawParametric();
+            if (type === 'fractal') drawFractal();
+
+            const end = performance.now();
+            renderTimeDisplay.innerText = `Render: ${(end - start).toFixed(1)}ms`;
+        }
+
+        function drawSpirograph() {
+            const { R, r, d, resol } = params;
+            ctx.beginPath();
+            ctx.strokeStyle = getColor(0, 1);
+            
+            for (let t = 0; t <= Math.PI * 2 * (r / Math.gcd(R, r)) * 10; t += 0.05) {
+                const x = (R - r) * Math.cos(t) + d * Math.cos(((R - r) * t) / r);
+                const y = (R - r) * Math.sin(t) - d * Math.sin(((R - r) * t) / r);
+                
+                const px = width/2 + x;
+                const py = height/2 + y;
+                
+                if (t === 0) ctx.moveTo(px, py);
+                else {
+                    ctx.strokeStyle = getColor(t, 50);
+                    ctx.lineTo(px, py);
+                }
+                
+                if (t > resol / 10) break; 
+            }
+            ctx.stroke();
+        }
+
+        function drawRose() {
+            const { n, d, size, points } = params;
+            ctx.translate(width/2, height/2);
+            
+            // Maurer Rose Lines
+            ctx.beginPath();
+            ctx.strokeStyle = getColor(0.5, 1);
+            for (let i = 0; i <= 360; i++) {
+                let k = i * d;
+                let r = size * Math.sin(n * k * Math.PI / 180);
+                let x = r * Math.cos(k * Math.PI / 180);
+                let y = r * Math.sin(k * Math.PI / 180);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Outline Rose
+            ctx.beginPath();
+            ctx.lineWidth = 2;
+            ctx.strokeStyle = getColor(1, 1);
+            for (let i = 0; i <= 360; i++) {
+                let r = size * Math.sin(n * i * Math.PI / 180);
+                let x = r * Math.cos(i * Math.PI / 180);
+                let y = r * Math.sin(i * Math.PI / 180);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+            
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
+        }
+
+        function drawParametric() {
+            const { a, b, c, scale } = params;
+            ctx.beginPath();
+            const iterations = 1000;
+            for(let t = 0; t < Math.PI * 2; t += 0.01) {
+                const x = Math.sin(a * t + c) * scale;
+                const y = Math.sin(b * t) * scale;
+                
+                const px = width/2 + x;
+                const py = height/2 + y;
+                
+                if(t === 0) ctx.moveTo(px, py);
+                else {
+                    ctx.strokeStyle = getColor(t, Math.PI * 2);
+                    ctx.lineTo(px, py);
+                }
+            }
+            ctx.stroke();
+        }
+
+        function drawFractal() {
+            const { iter, zoom, offsetX, offsetY } = params;
+            const imageData = ctx.createImageData(width, height);
+            const data = imageData.data;
+
+            for (let x = 0; x < width; x++) {
+                for (let y = 0; y < height; y++) {
+                    let zx = 0;
+                    let zy = 0;
+                    let cx = (x - width / 2) * (4 / width) / zoom + offsetX;
+                    let cy = (y - height / 2) * (4 / height) / zoom + offsetY;
+                    let i = iter;
+                    
+                    while (zx * zx + zy * zy < 4 && i > 0) {
+                        let tmp = zx * zx - zy * zy + cx;
+                        zy = 2 * zx * zy + cy;
+                        zx = tmp;
+                        i--;
+                    }
+
+                    const pix = (x + y * width) * 4;
+                    if (i > 0) {
+                        const colorStr = getColor(i, iter);
+                        // Simple parser for HSLA/RGBA to fill buffer
+                        const colorMatch = colorStr.match(/\d+/g);
+                        if(colorStr.startsWith('hsla')) {
+                             // Approximation for speed
+                             data[pix] = i * 2; data[pix+1] = i * 5; data[pix+2] = 255 - i;
+                        } else {
+                             data[pix] = colorMatch[0]; data[pix+1] = colorMatch[1]; data[pix+2] = colorMatch[2];
+                        }
+                    } else {
+                        data[pix] = data[pix+1] = data[pix+2] = 0;
+                    }
+                    data[pix+3] = 255;
+                }
+            }
+            ctx.putImageData(imageData, 0, 0);
+        }
+
+        Math.gcd = function(a, b) {
+            a = Math.abs(a);
+            b = Math.abs(b);
+            while (b) {
+                let t = b;
+                b = a % b;
+                a = t;
+            }
+            return a;
+        };
+
+        function downloadImage() {
+            const link = document.createElement('a');
+            link.download = `math-art-${Date.now()}.png`;
+            link.href = canvas.toDataURL('image/png');
+            link.click();
+        }
+
+        // Run app
+        init();
+
+    </script>
+</body>
+</html>
